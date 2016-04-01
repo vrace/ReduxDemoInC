@@ -75,6 +75,8 @@ typedef struct ActionToggle
     int id;
 } ACTION_TOGGLE;
 
+typedef void (*REDUCER_FUNC)(ITEM_ARRAY *items, ACTION *action);
+
 void AddTo(ITEM_ARRAY *items, ACTION *action)
 {
     if (action->type == ACTION_TYPE_ADD)
@@ -104,6 +106,37 @@ void Toggle(ITEM_ARRAY *items, ACTION *action)
     }
 }
 
+typedef struct Store
+{
+    ITEM_ARRAY *items;
+    REDUCER_FUNC *reducers;
+    int numReducers;
+} STORE;
+
+void StoreInit(STORE *store, ITEM_ARRAY *itemArray, REDUCER_FUNC *reducers, int numReducers)
+{
+    assert(itemArray != NULL);
+    assert(store != NULL);
+    assert(reducers != NULL);
+    
+    store->items = itemArray;
+    store->numReducers = numReducers;
+    store->reducers = reducers;
+}
+
+void StoreDispatch(STORE *store, ACTION *action)
+{
+    int i;
+    
+    assert(store != NULL);
+    assert(action != NULL);
+    
+    for (i = 0; i < store->numReducers; i++)
+    {
+        store->reducers[i](store->items, action);
+    }
+}
+
 void PrintItemArray(ITEM_ARRAY *items)
 {
     int i;
@@ -120,22 +153,6 @@ void PrintItemArray(ITEM_ARRAY *items)
     printf("========================================\n");
 }
 
-void RunAddTo(ITEM_ARRAY *items, const char *message)
-{
-    ACTION_ADD action;
-    int copysize;
-    
-    action.action.type = ACTION_TYPE_ADD;
-    copysize = strlen(message);
-    if (copysize >= MESSAGE_LENGTH)
-        copysize = MESSAGE_LENGTH - 1;
-    
-    memcpy(action.message, message, copysize);
-    action.message[copysize] = '\0';
-    
-    AddTo(items, (ACTION*)&action);
-}
-
 void RunToggle(ITEM_ARRAY *items, int id)
 {
     ACTION_TOGGLE action;
@@ -146,19 +163,52 @@ void RunToggle(ITEM_ARRAY *items, int id)
     Toggle(items, (ACTION*)&action);
 }
 
+ACTION* MakeAddToAction(ACTION_ADD *action, const char *message)
+{
+    int copysize;
+    
+    assert(action != NULL);
+    assert(message != NULL);
+    
+    action->action.type = ACTION_TYPE_ADD;
+    copysize = strlen(message);
+    if (copysize >= MESSAGE_LENGTH)
+        copysize = MESSAGE_LENGTH - 1;
+    
+    memcpy(action->message, message, copysize);
+    action->message[copysize] = '\0';
+    
+    return (ACTION*)action;
+}
+
+ACTION* MakeToggleAction(ACTION_TOGGLE *action, int id)
+{
+    assert(action != NULL);
+    
+    action->action.type = ACTION_TYPE_TOGGLE;
+    action->id = id;
+    
+    return (ACTION*)action;
+}
+
 int main(void)
 {
     ITEM_ARRAY items;
+    STORE store;
+    REDUCER_FUNC reducers[] = { AddTo, Toggle };
+    ACTION_ADD actionAdd;
+    ACTION_TOGGLE actionToggle;
     
     ItemArrayInit(&items);
+    StoreInit(&store, &items, reducers, sizeof(reducers) / sizeof(REDUCER_FUNC));
     
-    RunAddTo(&items, "Hello");
+    StoreDispatch(&store, MakeAddToAction(&actionAdd, "Hello"));
     PrintItemArray(&items);
     
-    RunAddTo(&items, "World");
+    StoreDispatch(&store, MakeAddToAction(&actionAdd, "World"));
     PrintItemArray(&items);
     
-    RunToggle(&items, 1);
+    StoreDispatch(&store, MakeToggleAction(&actionToggle, 1));
     PrintItemArray(&items);
     
     ItemArrayRelease(&items);
