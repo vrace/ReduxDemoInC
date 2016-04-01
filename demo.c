@@ -106,11 +106,14 @@ void Toggle(ITEM_ARRAY *items, ACTION *action)
     }
 }
 
+typedef void (*STORE_SUBSCRIBER_FUNC)(ITEM_ARRAY *items);
+
 typedef struct Store
 {
     ITEM_ARRAY *items;
     REDUCER_FUNC *reducers;
     int numReducers;
+    STORE_SUBSCRIBER_FUNC subscriber;
 } STORE;
 
 void StoreInit(STORE *store, ITEM_ARRAY *itemArray, REDUCER_FUNC *reducers, int numReducers)
@@ -135,6 +138,9 @@ void StoreDispatch(STORE *store, ACTION *action)
     {
         store->reducers[i](store->items, action);
     }
+    
+    if (store->subscriber)
+        store->subscriber(store->items);
 }
 
 void PrintItemArray(ITEM_ARRAY *items)
@@ -201,15 +207,11 @@ int main(void)
     
     ItemArrayInit(&items);
     StoreInit(&store, &items, reducers, sizeof(reducers) / sizeof(REDUCER_FUNC));
+    store.subscriber = PrintItemArray;
     
     StoreDispatch(&store, MakeAddToAction(&actionAdd, "Hello"));
-    PrintItemArray(&items);
-    
     StoreDispatch(&store, MakeAddToAction(&actionAdd, "World"));
-    PrintItemArray(&items);
-    
     StoreDispatch(&store, MakeToggleAction(&actionToggle, 1));
-    PrintItemArray(&items);
     
     ItemArrayRelease(&items);
     return 0;
