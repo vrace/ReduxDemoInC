@@ -5,8 +5,13 @@
 
 #define MESSAGE_LENGTH 100
 
-#define ACTION_TYPE_ADD    1
-#define ACTION_TYPE_TOGGLE 2
+#define ACTION_TYPE_ADD        1
+#define ACTION_TYPE_TOGGLE     2
+#define ACTION_TYPE_VISIBILITY 3
+
+#define VISIBILITY_TYPE_ALL        1
+#define VISIBILITY_TYPE_INCOMPLETE 2
+#define VISIBILITY_TYPE_COMPLETED  3
 
 typedef struct Item
 {
@@ -58,6 +63,44 @@ void ItemArrayAdd(ITEM_ARRAY *items, ITEM *item)
     items->items[items->count++] = *item;
 }
 
+typedef struct AppData
+{
+    int visibility;
+    ITEM_ARRAY itemArray;
+} APP_DATA;
+
+const char* visibilityDescription(int visibility)
+{
+    const char *visibilities[] =
+    {
+        "",
+        "ALL",
+        "INCOMPLETE",
+        "COMPLETED",
+    };
+    
+    if (visibility < 0 || visibility > VISIBILITY_TYPE_COMPLETED)
+        visibility = 0;
+    
+    return visibilities[visibility];
+}
+
+void AppDataInit(APP_DATA *data)
+{
+    assert(data != NULL);
+    
+    data->visibility = VISIBILITY_TYPE_ALL;
+    ItemArrayInit(&data->itemArray);
+}
+
+void AppDataRelease(APP_DATA *data)
+{
+    assert(data != NULL);
+    
+    ItemArrayRelease(&data->itemArray);
+    AppDataInit(data);
+}
+
 typedef struct Action
 {
     int type;
@@ -75,54 +118,69 @@ typedef struct ActionToggle
     int id;
 } ACTION_TOGGLE;
 
-typedef void (*REDUCER_FUNC)(ITEM_ARRAY *items, ACTION *action);
+typedef struct ActionVisibility
+{
+    ACTION action;
+    int visibility;
+} ACTION_VISIBILITY;
 
-void AddTo(ITEM_ARRAY *items, ACTION *action)
+typedef void (*REDUCER_FUNC)(APP_DATA *items, ACTION *action);
+
+void AddTo(APP_DATA *data, ACTION *action)
 {
     if (action->type == ACTION_TYPE_ADD)
     {
         ACTION_ADD *add = (ACTION_ADD*)action;
         ITEM item;
         
-        item.id = items->count;
+        item.id = data->itemArray.count;
         item.completed = 0;
         strcpy(item.message, add->message);
         
-        ItemArrayAdd(items, &item);
+        ItemArrayAdd(&data->itemArray, &item);
     }
 }
 
-void Toggle(ITEM_ARRAY *items, ACTION *action)
+void Toggle(APP_DATA *data, ACTION *action)
 {
     if (action->type == ACTION_TYPE_TOGGLE)
     {
         ACTION_TOGGLE *toggle = (ACTION_TOGGLE*)action;
         
-        if (toggle->id < items->count)
+        if (toggle->id < data->itemArray.count)
         {
-            ITEM *item = &items->items[toggle->id];
+            ITEM *item = &data->itemArray.items[toggle->id];
             item->completed = 1;
         }
     }
 }
 
-typedef void (*STORE_SUBSCRIBER_FUNC)(ITEM_ARRAY *items);
+void ChangeVisibility(APP_DATA *data, ACTION *action)
+{
+    if (action->type == ACTION_TYPE_VISIBILITY)
+    {
+        ACTION_VISIBILITY *visibility = (ACTION_VISIBILITY*)action;
+        data->visibility = visibility->visibility;
+    }
+}
+
+typedef void (*STORE_SUBSCRIBER_FUNC)(APP_DATA *data);
 
 typedef struct Store
 {
-    ITEM_ARRAY *items;
+    APP_DATA *appData;
     REDUCER_FUNC *reducers;
     int numReducers;
     STORE_SUBSCRIBER_FUNC subscriber;
 } STORE;
 
-void StoreInit(STORE *store, ITEM_ARRAY *itemArray, REDUCER_FUNC *reducers, int numReducers)
+void StoreInit(STORE *store, APP_DATA *data, REDUCER_FUNC *reducers, int numReducers)
 {
-    assert(itemArray != NULL);
+    assert(data != NULL);
     assert(store != NULL);
     assert(reducers != NULL);
     
-    store->items = itemArray;
+    store->appData = data;
     store->numReducers = numReducers;
     store->reducers = reducers;
 }
@@ -136,37 +194,29 @@ void StoreDispatch(STORE *store, ACTION *action)
     
     for (i = 0; i < store->numReducers; i++)
     {
-        store->reducers[i](store->items, action);
+        store->reducers[i](store->appData, action);
     }
     
     if (store->subscriber)
-        store->subscriber(store->items);
+        store->subscriber(store->appData);
 }
 
-void PrintItemArray(ITEM_ARRAY *items)
+void PrintItemArray(APP_DATA *data)
 {
     int i;
     
-    for (i = 0; i < items->count; i++)
+    for (i = 0; i < data->itemArray.count; i++)
     {
-        ITEM *item = &items->items[i];
+        ITEM *item = &data->itemArray.items[i];
         
         printf("%c   %s\n",
                item->completed ? 'X' : ' ',
                item->message);
     }
     
+    printf("**** %s ****\n", visibilityDescription(data->visibility));
+    
     printf("========================================\n");
-}
-
-void RunToggle(ITEM_ARRAY *items, int id)
-{
-    ACTION_TOGGLE action;
-    
-    action.action.type = ACTION_TYPE_TOGGLE;
-    action.id = id;
-    
-    Toggle(items, (ACTION*)&action);
 }
 
 ACTION* MakeAddToAction(ACTION_ADD *action, const char *message)
@@ -197,22 +247,35 @@ ACTION* MakeToggleAction(ACTION_TOGGLE *action, int id)
     return (ACTION*)action;
 }
 
+ACTION* MakeChangeVisibility(ACTION_VISIBILITY *action, int visibility)
+{
+    assert(action != NULL);
+    
+    action->action.type = ACTION_TYPE_VISIBILITY;
+    action->visibility = visibility;
+    
+    return (ACTION*)action;
+}
+
 int main(void)
 {
-    ITEM_ARRAY items;
+    APP_DATA appData;
     STORE store;
-    REDUCER_FUNC reducers[] = { AddTo, Toggle };
+    REDUCER_FUNC reducers[] = { AddTo, Toggle, ChangeVisibility };
     ACTION_ADD actionAdd;
     ACTION_TOGGLE actionToggle;
+    ACTION_VISIBILITY actionVisibility;
     
-    ItemArrayInit(&items);
-    StoreInit(&store, &items, reducers, sizeof(reducers) / sizeof(REDUCER_FUNC));
+    AppDataInit(&appData);
+    StoreInit(&store, &appData, reducers, sizeof(reducers) / sizeof(REDUCER_FUNC));
     store.subscriber = PrintItemArray;
     
     StoreDispatch(&store, MakeAddToAction(&actionAdd, "Hello"));
     StoreDispatch(&store, MakeAddToAction(&actionAdd, "World"));
     StoreDispatch(&store, MakeToggleAction(&actionToggle, 1));
+    StoreDispatch(&store, MakeChangeVisibility(&actionVisibility, VISIBILITY_TYPE_COMPLETED));
+    StoreDispatch(&store, MakeAddToAction(&actionAdd, "Funny"));
     
-    ItemArrayRelease(&items);
+    AppDataRelease(&appData);
     return 0;
 }
